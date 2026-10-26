@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>诗词接句</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #f5eddc; /* 米黄 */
+    color: #6b4f3a;      /* 淡褐 */
+    font-family: "KaiTi", "STKaiti", "SimSun", "Songti SC", serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* 错误提示条 */
+  .error-banner {
+    display: none;
+    width: 100%;
+    padding: 10px 0;
+    text-align: center;
+    font-size: 15px;
+    letter-spacing: 3px;
+    color: #f5eddc;
+    background: #b03a2e;
+  }
+
+  /* 顶部得分 */
+  .score-bar {
+    width: 100%;
+    padding: 20px 0;
+    text-align: center;
+    font-size: 20px;
+    letter-spacing: 4px;
+    color: #6b4f3a;
+    border-bottom: 1px solid #d8c9a8;
+  }
+  .score-bar span {
+    color: #b03a2e; /* 朱红 */
+    font-size: 24px;
+    font-weight: bold;
+  }
+
+  /* 中央题目区 */
+  .game {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 40px;
+    padding: 40px 20px;
+    max-width: 640px;
+    width: 100%;
+  }
+
+  .question {
+    font-size: 34px;
+    letter-spacing: 8px;
+    color: #5a4130;
+    writing-mode: horizontal-tb;
+    text-align: center;
+  }
+
+  .hint {
+    font-size: 15px;
+    letter-spacing: 3px;
+    color: #a68a6d;
+  }
+
+  /* 选项按钮 */
+  .options {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 100%;
+    max-width: 360px;
+  }
+
+  .option-btn {
+    font-family: inherit;
+    font-size: 20px;
+    letter-spacing: 4px;
+    padding: 14px 20px;
+    background: #efe3c8;
+    color: #6b4f3a;
+    border: 1px solid #d8c9a8;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+  }
+  .option-btn:hover {
+    background: #e7d7b4;
+    border-color: #b03a2e;
+    color: #b03a2e;
+  }
+  .option-btn:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+  .option-btn.correct {
+    background: #b03a2e;
+    border-color: #b03a2e;
+    color: #f5eddc;
+    opacity: 1;
+  }
+  .option-btn.wrong {
+    border-color: #b03a2e;
+    color: #b03a2e;
+  }
+
+  /* 反馈文字 */
+  .feedback {
+    height: 32px;
+    font-size: 22px;
+    letter-spacing: 4px;
+    color: #b03a2e;
+  }
+
+  .next-btn {
+    font-family: inherit;
+    font-size: 16px;
+    letter-spacing: 3px;
+    padding: 10px 32px;
+    background: transparent;
+    color: #6b4f3a;
+    border: 1px solid #b03a2e;
+    border-radius: 4px;
+    cursor: pointer;
+    visibility: hidden;
+    transition: background 0.2s, color 0.2s;
+  }
+  .next-btn:hover {
+    background: #b03a2e;
+    color: #f5eddc;
+  }
+</style>
+</head>
+<body>
+
+<div class="error-banner" id="errorBanner">数据未保存，请检查网络</div>
+<div class="score-bar">得分：<span id="score">…</span></div>
+
+<div class="game">
+  <div class="hint">请选出下一句</div>
+  <div class="question" id="question"></div>
+  <div class="options" id="options"></div>
+  <div class="feedback" id="feedback"></div>
+  <button class="next-btn" id="nextBtn">下一题</button>
+</div>
+
+<script>
+  // 题库：上句 + 正确下句 + 两个干扰项
+  var poems = [
+    { top: "床前明月光", answer: "疑是地上霜", wrong: ["低头思故乡", "举头望明月"] },
+    { top: "春眠不觉晓", answer: "处处闻啼鸟", wrong: ["夜来风雨声", "花落知多少"] },
+    { top: "白日依山尽", answer: "黄河入海流", wrong: ["欲穷千里目", "更上一层楼"] },
+    { top: "锄禾日当午", answer: "汗滴禾下土", wrong: ["谁知盘中餐", "粒粒皆辛苦"] },
+    { top: "红豆生南国", answer: "春来发几枝", wrong: ["愿君多采撷", "此物最相思"] },
+    { top: "离离原上草", answer: "一岁一枯荣", wrong: ["野火烧不尽", "春风吹又生"] },
+    { top: "鹅鹅鹅", answer: "曲项向天歌", wrong: ["白毛浮绿水", "红掌拨清波"] },
+    { top: "欲穷千里目", answer: "更上一层楼", wrong: ["黄河入海流", "白日依山尽"] },
+    { top: "国破山河在", answer: "城春草木深", wrong: ["感时花溅泪", "恨别鸟惊心"] },
+    { top: "海内存知己", answer: "天涯若比邻", wrong: ["无为在歧路", "儿女共沾巾"] }
+  ];
+
+  // Supabase 初始化（CDN 在 window.supabase 上暴露 createClient）
+  var SUPABASE_URL = "https://zgssppteithjcqcbeibl.supabase.co";
+  var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpnc3NwcHRlaXRoamNxY2JlaWJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5NTc1NTcsImV4cCI6MjEwODUzMzU1N30.lK358V7dOnggivQXUzInQFuDP5S4dgR8wOXbRUGV_Ik";
+  var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  var userId = null;
+  var loggedIn = false;
+  var current = null;
+  var usedIndexes = [];
+  var answered = false;
+
+  var scoreEl = document.getElementById("score");
+  var questionEl = document.getElementById("question");
+  var optionsEl = document.getElementById("options");
+  var feedbackEl = document.getElementById("feedback");
+  var nextBtn = document.getElementById("nextBtn");
+  var errorBanner = document.getElementById("errorBanner");
+
+  function showError(err) {
+    var msg = (err && err.message) ? err.message : String(err || "未知错误");
+    console.error("[Supabase]", err);
+    errorBanner.textContent = "数据未保存：" + msg;
+    errorBanner.style.display = "block";
+  }
+  function hideError() { errorBanner.style.display = "none"; }
+
+  // 登录就绪后启用按钮
+  function onLoginReady() {
+    loggedIn = true;
+    hideError();
+    var btns = optionsEl.querySelectorAll(".option-btn");
+    btns.forEach(function (b) { b.disabled = false; });
+  }
+
+  // 第一步：匿名登录，成功拿到 user.id 后才进行后续 profiles 操作
+  function initUser() {
+    sb.auth.signInAnonymously().then(function (res) {
+      if (res.error || !res.data || !res.data.user) {
+        showError(res.error || new Error("匿名登录失败"));
+        return;
+      }
+      userId = res.data.user.id;
+      // 登录彻底完成后再查询 profiles
+      loadProfile();
+    }).catch(function (err) {
+      // 网络等原因导致登录请求本身失败
+      console.error("[Supabase]", err);
+      errorBanner.textContent = "登录失败，请检查网络或稍后再试";
+      errorBanner.style.display = "block";
+    });
+  }
+
+  // 第二步：查询 profiles，无记录则插入 points = 0
+  function loadProfile() {
+    sb.from("profiles").select("points").eq("id", userId).maybeSingle()
+      .then(function (res) {
+        if (res.error) { showError(res.error); return; }
+        if (!res.data) {
+          return sb.from("profiles").insert({ id: userId, points: 0 }).then(function (ins) {
+            if (ins.error) { showError(ins.error); return; }
+            scoreEl.textContent = 0;
+            onLoginReady();
+          });
+        }
+        scoreEl.textContent = res.data.points;
+        onLoginReady();
+      })
+      .catch(function (err) { showError(err); });
+  }
+
+  // 答对后积分 +10，并重新读取最新积分显示
+  function addPoints() {
+    if (!userId) { showError(new Error("用户尚未登录完成")); return; }
+    sb.from("profiles").select("points").eq("id", userId).single()
+      .then(function (res) {
+        if (res.error) { showError(res.error); return; }
+        var newPoints = (res.data.points || 0) + 10;
+        return sb.from("profiles").update({ points: newPoints }).eq("id", userId);
+      })
+      .then(function (upd) {
+        if (!upd) return;
+        if (upd.error) { showError(upd.error); return; }
+        // 重新读取显示最新积分
+        return sb.from("profiles").select("points").eq("id", userId).single();
+      })
+      .then(function (fresh) {
+        if (!fresh) return;
+        if (fresh.error) { showError(fresh.error); return; }
+        scoreEl.textContent = fresh.data.points;
+        hideError();
+      })
+      .catch(function (err) { showError(err); });
+  }
+
+  function pickQuestion() {
+    if (usedIndexes.length === poems.length) {
+      usedIndexes = [];
+    }
+    var idx;
+    do {
+      idx = Math.floor(Math.random() * poems.length);
+    } while (usedIndexes.indexOf(idx) !== -1);
+    usedIndexes.push(idx);
+    return poems[idx];
+  }
+
+  function shuffle(arr) {
+    var a = arr.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+
+  function renderQuestion() {
+    current = pickQuestion();
+    answered = false;
+    feedbackEl.textContent = "";
+    nextBtn.style.visibility = "hidden";
+    questionEl.textContent = current.top;
+
+    var choices = shuffle([current.answer].concat(current.wrong));
+    optionsEl.innerHTML = "";
+    choices.forEach(function (text) {
+      var btn = document.createElement("button");
+      btn.className = "option-btn";
+      btn.textContent = text;
+      btn.disabled = !loggedIn; // 登录完成前禁用
+      btn.onclick = function () { onChoose(btn, text); };
+      optionsEl.appendChild(btn);
+    });
+  }
+
+  function onChoose(btn, text) {
+    if (answered) return;
+
+    if (text === current.answer) {
+      answered = true;
+      addPoints();
+      feedbackEl.textContent = "+10 分";
+      btn.classList.add("correct");
+      // 禁用所有按钮，显示“下一题”
+      var btns = optionsEl.querySelectorAll(".option-btn");
+      btns.forEach(function (b) { b.disabled = true; });
+      nextBtn.style.visibility = "visible";
+    } else {
+      feedbackEl.textContent = "再想想";
+      btn.classList.add("wrong");
+      btn.disabled = true;
+    }
+  }
+
+  nextBtn.onclick = renderQuestion;
+
+  initUser();
+  renderQuestion();
+</script>
+
+</body>
+</html>
